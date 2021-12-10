@@ -4,95 +4,49 @@ import pandas as pd
 import numpy as np
 import math
 from shapely.geometry import Polygon
+from h3 import h3
+import folium
 
-
-def create_hexagon(l, x, y):
+def visualize_hexagons(hexagons, color="red", folium_map=None):
     """
-    Create a hexagon centered on (x, y)
-    :param l: length of the hexagon's edge
-    :param x: x-coordinate of the hexagon's center
-    :param y: y-coordinate of the hexagon's center
-    :return: The polygon containing the hexagon's coordinates
+    hexagons is a list of hexcluster. Each hexcluster is a list of hexagons. 
+    eg. [[hex1, hex2], [hex3, hex4]]
     """
-    c = [[x + math.cos(math.radians(angle)) * l, y + math.sin(math.radians(angle)) * l]
-         for angle in range(0, 360, 60)]
-    return Polygon(c)
-
-
-def create_hexgrid(bbox, side):
-    """
-    returns an array of Points describing hexagons centers that are inside the given bounding_box
-    :param bbox: The containing bounding box. The bbox coordinate should be in Webmercator.
-    :param side: The size of the hexagons'
-    :return: The hexagon grid
-    """
-    grid = []
-
-    v_step = math.sqrt(3) * side
-    h_step = 1.5 * side
-
-    x_min = min(bbox[0], bbox[2])
-    x_max = max(bbox[0], bbox[2])
-    y_min = min(bbox[1], bbox[3])
-    y_max = max(bbox[1], bbox[3])
-
-    h_skip = math.ceil(x_min / h_step) - 1
-    h_start = h_skip * h_step
-
-    v_skip = math.ceil(y_min / v_step) - 1
-    v_start = v_skip * v_step
-
-    h_end = x_max + h_step
-    v_end = y_max + v_step
-
-    if v_start - (v_step / 2.0) < y_min:
-        v_start_array = [v_start + (v_step / 2.0), v_start]
+    polylines = []
+    lat = []
+    lng = []
+    for hex in hexagons:
+        polygons = h3.h3_set_to_multi_polygon([hex], geo_json=False)
+        # flatten polygons into loops.
+        outlines = [loop for polygon in polygons for loop in polygon]
+        polyline = [outline + [outline[0]] for outline in outlines][0]
+        lat.extend(map(lambda v:v[0],polyline))
+        lng.extend(map(lambda v:v[1],polyline))
+        polylines.append(polyline)
+    
+    if folium_map is None:
+        m = folium.Map(location=[sum(lat)/len(lat), sum(lng)/len(lng)], zoom_start=13, tiles='cartodbpositron')
     else:
-        v_start_array = [v_start - (v_step / 2.0), v_start]
+        m = folium_map
+    for polyline in polylines:
+        my_PolyLine=folium.PolyLine(locations=polyline,weight=8,color=color)
+        m.add_child(my_PolyLine)
+    return m
+    
 
-    v_start_idx = int(abs(h_skip) % 2)
+def visualize_polygon(polyline, color):
+    polyline.append(polyline[0])
+    lat = [p[0] for p in polyline]
+    lng = [p[1] for p in polyline]
+    m = folium.Map(location=[sum(lat)/len(lat), sum(lng)/len(lng)], zoom_start=13, tiles='cartodbpositron')
+    my_PolyLine=folium.PolyLine(locations=polyline,weight=8,color=color)
+    m.add_child(my_PolyLine)
+    return m
 
-    c_x = h_start
-    c_y = v_start_array[v_start_idx]
-    v_start_idx = (v_start_idx + 1) % 2
-    while c_x < h_end:
-        while c_y < v_end:
-            grid.append((c_x, c_y))
-            c_y += v_step
-        c_x += h_step
-        c_y = v_start_array[v_start_idx]
-        v_start_idx = (v_start_idx + 1) % 2
-
-    return grid
-
-
-def bbhexgrid():
-    edge = math.sqrt(RESOLUTION**2/(3/2 * math.sqrt(3)))
-    hex_centers = create_hexgrid(reprojected_true.bounds, edge)
-    hexagons = GeometryCollection([
-        reproject_from_true_meters(create_hexagon(edge, center[0], center[1]))
-        for center in hex_centers
-        if any([zone.intersects(
-            reproject_from_true_meters(
-                create_hexagon(edge, center[0], center[1]))
-        ) for zone in geometry.geoms])
-    ])
-
-
-def traverse_hex():
-    """
-    traverse hexagon fields
-    """
-
-
-@click.command()
-@click.option('--directory', default="Sample", help='data directory to process.')
-def main(directory):
-    hexagon = create_hexagon(2,0,0)
-    hexdata = {'geometry': [hexagon]}
-    hexdf = gpd.GeoDataFrame(hexdata, crs="EPSG:6933")
-    hexdf.to_file("hex.shp")
-    print(hexdf)
+def main():
+    h3_address = h3.geo_to_h3(37.3615593, -122.0553238, 9) # lat, lng, hex resolution                                                                                                        
+    m = visualize_hexagons([h3_address])
+    print(m)
     
 
 if __name__ == '__main__':
